@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { usData } from './data/us'
+import { getUSLiveData } from './data/usLive'
 import type { CountryData, Metric, Cohort } from './data/us'
 import { TrendingUp, TrendingDown, Minus, ChevronDown, ChevronUp } from 'lucide-react'
 
@@ -142,7 +143,20 @@ function OverallScore({ data }: { data: CountryData }) {
 
 export default function App() {
   const [activeCountry] = useState('us')
-  const data = activeCountry === 'us' ? usData : usData
+  const [data, setData] = useState(usData)
+  const [liveMode, setLiveMode] = useState(false)
+
+  useEffect(() => {
+    let mounted = true
+    getUSLiveData().then((liveData) => {
+      if (!mounted) return
+      setData(liveData)
+      setLiveMode(liveData.lastUpdated !== usData.lastUpdated)
+    })
+    return () => {
+      mounted = false
+    }
+  }, [])
 
   return (
     <div className="min-h-screen" style={{ background: 'var(--bg-base)' }}>
@@ -157,7 +171,7 @@ export default function App() {
           </div>
           <div className="flex items-center gap-1.5">
             <span className="live-dot w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block"></span>
-            <span className="text-xs text-slate-500 font-mono">{data.lastUpdated}</span>
+            <span className="text-xs text-slate-500 font-mono">{liveMode ? `Live ${data.lastUpdated}` : data.lastUpdated}</span>
           </div>
         </div>
       </header>
@@ -212,7 +226,7 @@ export default function App() {
 
         {/* Footer */}
         <div className="mt-12 pt-6 border-t border-slate-800 text-xs text-slate-600 font-mono flex flex-col sm:flex-row gap-2 justify-between">
-          <span>Daten: FRED, World Bank, BLS, Census Bureau, MBA · Mock-Stand {data.lastUpdated}</span>
+          <span>Daten: FRED, World Bank, BLS, Census Bureau, MBA · {liveMode ? `Live-Update ${data.lastUpdated}` : `Mock-Stand ${data.lastUpdated}`}</span>
           <span>Klick auf Metrik = Erklärung</span>
         </div>
       </main>
