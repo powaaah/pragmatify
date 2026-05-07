@@ -4,6 +4,7 @@ import { getUSLiveData } from './data/usLive'
 import type { CountryData, Metric, Cohort } from './data/us'
 import { TrendingUp, TrendingDown, Minus, ChevronDown, ChevronUp, X, Sun, Moon } from 'lucide-react'
 import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip, CartesianGrid } from 'recharts'
+import CookieBanner from './components/CookieBanner'
 
 type ThemeMode = 'dark' | 'light'
 type RangeMode = '6M' | '1Y' | '3Y'
@@ -305,6 +306,7 @@ export default function App() {
       </main>
 
       {selectedMetric && <MetricModal metric={selectedMetric} onClose={() => setSelectedMetric(null)} />}
+      <CookieBanner />
     </div>
   )
 }
