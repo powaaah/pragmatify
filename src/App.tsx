@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { usData } from './data/us'
+import { deData } from './data/germany'
+import { cnData } from './data/china'
+import { inData } from './data/india'
 import { getUSLiveData } from './data/usLive'
 import type { CountryData, Metric, Cohort } from './data/us'
 import { TrendingUp, TrendingDown, Minus, ChevronDown, ChevronUp, X, Sun, Moon } from 'lucide-react'
@@ -11,10 +14,17 @@ type RangeMode = '6M' | '1Y' | '3Y'
 
 const countries = [
   { id: 'us', name: 'USA', flag: '🇺🇸', available: true },
-  { id: 'de', name: 'Deutschland', flag: '🇩🇪', available: false },
-  { id: 'cn', name: 'China', flag: '🇨🇳', available: false },
-  { id: 'in', name: 'Indien', flag: '🇮🇳', available: false },
+  { id: 'de', name: 'Deutschland', flag: '🇩🇪', available: true },
+  { id: 'cn', name: 'China', flag: '🇨🇳', available: true },
+  { id: 'in', name: 'Indien', flag: '🇮🇳', available: true },
 ]
+
+const countryDataMap: Record<string, CountryData> = {
+  us: usData,
+  de: deData,
+  cn: cnData,
+  in: inData,
+}
 
 const metricMeta: Record<string, { title: string; explanation: string; breakdown: { label: string; value: string }[] }> = {
   inflation: {
@@ -211,8 +221,8 @@ function OverallScore({ data }: { data: CountryData }) {
 }
 
 export default function App() {
-  const [activeCountry] = useState('us')
-  const [data, setData] = useState(usData)
+  const [activeCountry, setActiveCountry] = useState('us')
+  const [data, setData] = useState<CountryData>(countryDataMap[activeCountry])
   const [liveMode, setLiveMode] = useState(false)
   const [theme, setTheme] = useState<ThemeMode>('dark')
   const [selectedMetric, setSelectedMetric] = useState<Metric | null>(null)
@@ -222,16 +232,21 @@ export default function App() {
   }, [theme])
 
   useEffect(() => {
-    let mounted = true
-    getUSLiveData().then((liveData) => {
-      if (!mounted) return
-      setData(liveData)
-      setLiveMode(liveData.lastUpdated !== usData.lastUpdated)
-    })
-    return () => {
-      mounted = false
+    setData(countryDataMap[activeCountry])
+    if (activeCountry === 'us') {
+      let mounted = true
+      getUSLiveData().then((liveData) => {
+        if (!mounted) return
+        setData(liveData)
+        setLiveMode(liveData.lastUpdated !== usData.lastUpdated)
+      })
+      return () => {
+        mounted = false
+      }
+    } else {
+      setLiveMode(false)
     }
-  }, [])
+  }, [activeCountry])
 
   return (
     <div className="min-h-screen app-shell">
@@ -260,7 +275,7 @@ export default function App() {
           {countries.map((c) => (
             <button
               key={c.id}
-              disabled={!c.available}
+              onClick={() => c.available && setActiveCountry(c.id)}
               className={`flex items-center gap-2 px-4 py-2 rounded-full border text-sm font-body transition-all whitespace-nowrap ${
                 c.id === activeCountry
                   ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-500'
@@ -271,7 +286,6 @@ export default function App() {
             >
               <span>{c.flag}</span>
               <span>{c.name}</span>
-              {!c.available && <span className="text-xs text-[var(--text-muted)]">bald</span>}
             </button>
           ))}
         </div>
