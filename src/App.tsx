@@ -7,11 +7,15 @@ import { getUSLiveData } from './data/usLive'
 import type { CountryData, Metric, Cohort } from './data/us'
 import { fetchMacroSeries } from './lib/macroSeries'
 import { TrendingUp, TrendingDown, Minus, ChevronDown, ChevronUp, X, Sun, Moon } from 'lucide-react'
-import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip, CartesianGrid } from 'recharts'
+import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip, CartesianGrid, ReferenceDot } from 'recharts'
 import CookieBanner from './components/CookieBanner'
 
 type ThemeMode = 'dark' | 'light'
-type RangeMode = '6M' | '1Y' | '3Y'
+type RangeMode = '6M' | '1Y' | '3Y' | '10Y' | '30Y'
+type ScaleMode = 'auto' | 'padded'
+
+type SeriesPoint = { label: string; value: number }
+type MetricMeta = { title: string; explanation: string; calculation: string; breakdown: { label: string; value: string }[] }
 
 const countries = [
   { id: 'us', name: 'USA', flag: '🇺🇸', available: true },
@@ -34,11 +38,13 @@ const countryDataQuality: Record<string, { mode: 'live' | 'snapshot'; note: stri
   in: { mode: 'snapshot', note: 'Aktuell Snapshot-Werte (kein Live-Feed)' },
 }
 
-const metricMeta: Record<string, { title: string; explanation: string; breakdown: { label: string; value: string }[] }> = {
+const metricMeta: Record<string, MetricMeta> = {
   inflation: {
     title: 'Inflation (CPI)',
     explanation:
       'Die Inflation zeigt, wie stark die Verbraucherpreise steigen. Für den Median-Haushalt ist wichtig, ob Lohnwachstum nach Inflation noch positiv ist.',
+    calculation:
+      'Gemessen als jährliche Veränderung des Consumer Price Index (CPI): (CPI aktuell / CPI vor 12 Monaten - 1) × 100.',
     breakdown: [
       { label: 'Wohnkosten', value: '2.0%' },
       { label: 'Spritpreise', value: '5.0%' },
@@ -50,6 +56,7 @@ const metricMeta: Record<string, { title: string; explanation: string; breakdown
     title: 'Staatsverschuldung (% GDP)',
     explanation:
       'Die Schuldenquote misst die Tragfähigkeit der Staatsfinanzen. Kritisch wird es, wenn gleichzeitig die Zinslast und Refinanzierungskosten steigen.',
+    calculation: 'Berechnet als Staatsschulden / nominales BIP × 100. Höhere Quoten erhöhen mittelfristig Zins- und Refinanzierungsrisiken.',
     breakdown: [
       { label: '2-jährige Anleihen', value: '30%' },
       { label: '10-jährige Anleihen', value: '60%' },
@@ -60,6 +67,8 @@ const metricMeta: Record<string, { title: string; explanation: string; breakdown
     title: '30Y Hypothekenrate',
     explanation:
       'Die 30-jährige Hypothekenrate beeinflusst direkt die monatliche Belastung von Käufern und damit Nachfrage, Bauaktivität und Konsum.',
+    calculation:
+      'Wochendurchschnitt für 30-jährige Festhypotheken (z. B. Freddie Mac PMMS). Monatsrate abgeleitet über Standard-Annuitätenformel.',
     breakdown: [
       { label: '2021 Monatsrate', value: '~1.500 USD' },
       { label: 'Heute', value: '~2.400 USD' },
@@ -68,26 +77,62 @@ const metricMeta: Record<string, { title: string; explanation: string; breakdown
   },
 }
 
-const defaultMeta = {
+const defaultMeta: MetricMeta = {
   title: 'KPI-Details',
   explanation:
     'Diese Kennzahl zeigt Richtung und Stärke der wirtschaftlichen Entwicklung. Für Entscheidungen ist der Trend meist wichtiger als der Einzelwert.',
+  calculation: 'Berechnung je KPI nach offizieller Quellmethodik (z. B. YoY, QoQ, Quotienten oder Indexstände).',
   breakdown: [
     { label: 'Signalqualität', value: 'Mittel–Hoch' },
     { label: 'Aktualisierungsrhythmus', value: 'Monatlich/Quartalsweise' },
   ],
 }
 
+const rangePoints: Record<RangeMode, number> = {
+  '6M': 6,
+  '1Y': 12,
+  '3Y': 36,
+  '10Y': 120,
+  '30Y': 360,
+}
+
 function makeSeries(metric: Metric, range: RangeMode) {
   const seed = Number(metric.value.replace(',', '.').replace(/[^0-9.-]/g, '')) || 1
-  const points = range === '6M' ? 6 : range === '1Y' ? 12 : 36
-  const result = [] as { label: string; value: number }[]
+  const points = rangePoints[range]
+  const result = [] as SeriesPoint[]
   for (let i = points - 1; i >= 0; i--) {
     const drift = (Math.sin(i / 2.5) + Math.cos(i / 3.7)) * 0.8
     const v = Math.max(0, seed + drift - i * 0.03)
-    result.push({ label: `${i === 0 ? 'Jetzt' : `-${i}m`}`, value: Number(v.toFixed(2)) })
+    const monthsAgo = i
+    const label = monthsAgo === 0 ? 'Jetzt' : range === '6M' || range === '1Y' ? `-${monthsAgo}m` : `-${Math.round(monthsAgo / 12)}y`
+    result.push({ label, value: Number(v.toFixed(2)) })
   }
   return result
+}
+
+function getYAxisDomain(series: SeriesPoint[], scaleMode: ScaleMode): [number, number] | ['auto', 'auto'] {
+  if (!series.length || scaleMode === 'auto') return ['auto', 'auto']
+  const values = series.map((p) => p.value)
+  const min = Math.min(...values)
+  const max = Math.max(...values)
+  const spread = max - min
+  if (spread === 0) {
+    const pad = Math.max(Math.abs(max) * 0.05, 1)
+    return [Number((min - pad).toFixed(2)), Number((max + pad).toFixed(2))]
+  }
+  const pad = spread * 0.08
+  return [Number((min - pad).toFixed(2)), Number((max + pad).toFixed(2))]
+}
+
+function getTickFormatter(range: RangeMode) {
+  const short = range === '6M' || range === '1Y' || range === '3Y'
+  return (_value: string, index: number) => {
+    const now = new Date()
+    const monthsBack = rangePoints[range] - 1 - index
+    const d = new Date(now.getFullYear(), now.getMonth() - monthsBack, 1)
+    if (short) return d.toLocaleDateString('de-DE', { month: 'short', year: '2-digit' })
+    return d.toLocaleDateString('de-DE', { year: 'numeric' })
+  }
 }
 
 function StatusDot({ status }: { status: 'green' | 'yellow' | 'red' }) {
@@ -136,15 +181,17 @@ function ScoreBadge({ score }: { score: 'green' | 'yellow' | 'red' }) {
 
 function MetricModal({ metric, onClose, activeCountry }: { metric: Metric; onClose: () => void; activeCountry: string }) {
   const [range, setRange] = useState<RangeMode>('1Y')
-  const [realSeries, setRealSeries] = useState<Array<{ label: string; value: number }> | null>(null)
+  const [scaleMode, setScaleMode] = useState<ScaleMode>('auto')
+  const [realSeries, setRealSeries] = useState<Array<SeriesPoint> | null>(null)
   const [seriesSource, setSeriesSource] = useState<string>('Modellierte Zeitreihe (Fallback)')
+  const [markers, setMarkers] = useState<number[]>([])
   const meta = metricMeta[metric.id] ?? defaultMeta
   const syntheticSeries = useMemo(() => makeSeries(metric, range), [metric, range])
   const series = realSeries ?? syntheticSeries
 
   useEffect(() => {
     let mounted = true
-    const limit = range === '6M' ? 6 : range === '1Y' ? 12 : 36
+    const limit = rangePoints[range]
 
     fetchMacroSeries(activeCountry, metric.id, limit)
       .then((result) => {
@@ -168,12 +215,19 @@ function MetricModal({ metric, onClose, activeCountry }: { metric: Metric; onClo
   }, [metric.id, range, activeCountry])
 
   useEffect(() => {
+    setMarkers([])
+  }, [metric.id, range, activeCountry])
+
+  useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose()
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [onClose])
+
+  const yDomain = useMemo(() => getYAxisDomain(series, scaleMode), [series, scaleMode])
+  const tickFormatter = useMemo(() => getTickFormatter(range), [range])
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/55" onClick={onClose}>
@@ -182,40 +236,81 @@ function MetricModal({ metric, onClose, activeCountry }: { metric: Metric; onClo
           <div>
             <h3 className="font-display text-2xl text-[var(--text-primary)]">{meta.title}</h3>
             <p className="text-sm text-[var(--text-secondary)] mt-1">{meta.explanation}</p>
+            <p className="text-xs text-[var(--text-muted)] mt-2"><span className="font-semibold">Berechnung:</span> {meta.calculation}</p>
           </div>
           <button onClick={onClose} className="p-2 rounded-lg border border-[var(--border)] hover:bg-slate-100/20">
             <X className="w-4 h-4" />
           </button>
         </div>
 
-        <div className="mb-3 flex gap-2">
-          {(['6M', '1Y', '3Y'] as RangeMode[]).map((r) => (
+        <div className="mb-3 flex flex-wrap gap-2 items-center justify-between">
+          <div className="flex gap-2 flex-wrap">
+            {(['6M', '1Y', '3Y', '10Y', '30Y'] as RangeMode[]).map((r) => (
+              <button
+                key={r}
+                onClick={() => setRange(r)}
+                className={`px-3 py-1.5 rounded-lg text-xs border ${
+                  range === r ? 'border-cyan-500 text-cyan-500 bg-cyan-500/10' : 'border-[var(--border)] text-[var(--text-secondary)]'
+                }`}
+              >
+                {r}
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center gap-1 text-xs">
             <button
-              key={r}
-              onClick={() => setRange(r)}
-              className={`px-3 py-1.5 rounded-lg text-xs border ${
-                range === r ? 'border-cyan-500 text-cyan-500 bg-cyan-500/10' : 'border-[var(--border)] text-[var(--text-secondary)]'
-              }`}
+              onClick={() => setScaleMode('auto')}
+              className={`px-2.5 py-1 rounded-md border ${scaleMode === 'auto' ? 'border-cyan-500 text-cyan-500' : 'border-[var(--border)] text-[var(--text-secondary)]'}`}
             >
-              {r}
+              Auto-Fit
             </button>
-          ))}
+            <button
+              onClick={() => setScaleMode('padded')}
+              className={`px-2.5 py-1 rounded-md border ${scaleMode === 'padded' ? 'border-cyan-500 text-cyan-500' : 'border-[var(--border)] text-[var(--text-secondary)]'}`}
+            >
+              Gepolstert
+            </button>
+          </div>
         </div>
 
         <div className="h-64 rounded-xl border border-[var(--border)] p-3 bg-[var(--bg-surface)]">
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={series}>
+            <LineChart
+              data={series}
+              onClick={(state) => {
+                if (typeof state?.activeTooltipIndex !== 'number') return
+                const idx = state.activeTooltipIndex
+                setMarkers((prev) => (prev.includes(idx) ? prev.filter((m) => m !== idx) : [...prev, idx]))
+              }}
+            >
               <CartesianGrid strokeDasharray="3 3" stroke="var(--grid)" />
-              <XAxis dataKey="label" stroke="var(--text-muted)" fontSize={12} />
-              <YAxis stroke="var(--text-muted)" fontSize={12} />
-              <Tooltip />
-              <Line type="monotone" dataKey="value" stroke="#06b6d4" strokeWidth={2.5} dot={false} />
+              <XAxis dataKey="label" tickFormatter={tickFormatter} stroke="var(--text-muted)" fontSize={12} minTickGap={20} />
+              <YAxis domain={yDomain} stroke="var(--text-muted)" fontSize={12} />
+              <Tooltip labelFormatter={(_, index) => tickFormatter('', Number(index) || 0)} />
+              <Line type="linear" dataKey="value" stroke="#06b6d4" strokeWidth={2.5} dot={false} />
+              {markers.map((idx) => {
+                const point = series[idx]
+                if (!point) return null
+                return (
+                  <ReferenceDot
+                    key={`marker-${idx}`}
+                    x={point.label}
+                    y={point.value}
+                    r={5}
+                    fill="#f59e0b"
+                    stroke="#ffffff"
+                    strokeWidth={1}
+                    ifOverflow="visible"
+                    onClick={() => setMarkers((prev) => prev.filter((m) => m !== idx))}
+                  />
+                )
+              })}
             </LineChart>
           </ResponsiveContainer>
         </div>
 
         <div className="mt-3 text-xs text-[var(--text-muted)] font-mono">
-          Quelle: {seriesSource} · Aktualisierung: {range}
+          Quelle: {seriesSource} · Aktualisierung: {range} · Marker: Klick in den Chart zum Setzen/Entfernen
         </div>
 
         <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-2">
