@@ -6,6 +6,11 @@ export interface FredPoint {
   date: string
 }
 
+export interface FredSeriesPoint {
+  date: string
+  value: number
+}
+
 export async function fetchFredLatest(seriesId: string, apiKey: string): Promise<FredPoint | null> {
   const url = new URL(FRED_BASE_URL)
   url.searchParams.set('series_id', seriesId)
@@ -31,4 +36,24 @@ export async function fetchFredLatest(seriesId: string, apiKey: string): Promise
     previous: valid[1]?.value ?? null,
     date: valid[0].date,
   }
+}
+
+export async function fetchFredSeries(seriesId: string, apiKey: string, limit = 36): Promise<FredSeriesPoint[]> {
+  const url = new URL(FRED_BASE_URL)
+  url.searchParams.set('series_id', seriesId)
+  url.searchParams.set('api_key', apiKey)
+  url.searchParams.set('file_type', 'json')
+  url.searchParams.set('sort_order', 'asc')
+  url.searchParams.set('limit', String(Math.max(6, limit)))
+
+  const res = await fetch(url.toString())
+  if (!res.ok) return []
+
+  const json = await res.json()
+  const observations = (json?.observations ?? []) as Array<{ date: string; value: string }>
+
+  return observations
+    .filter((o) => o.value !== '.')
+    .map((o) => ({ date: o.date, value: Number(o.value) }))
+    .filter((o) => Number.isFinite(o.value))
 }

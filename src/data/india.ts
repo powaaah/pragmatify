@@ -153,7 +153,7 @@ export const inData: CountryData = {
           label: 'Kreditwachstum (Banken)',
           value: '14.2',
           unit: '% YoY',
-          trend: 'stable',
+          trend: 'flat',
           status: 'green',
           detail: 'Gesund; Private Credit auch wachsend',
           trendValue: '±0.3pp'

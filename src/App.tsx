@@ -5,6 +5,7 @@ import { cnData } from './data/china'
 import { inData } from './data/india'
 import { getUSLiveData } from './data/usLive'
 import type { CountryData, Metric, Cohort } from './data/us'
+import { fetchMacroSeries } from './lib/macroSeries'
 import { TrendingUp, TrendingDown, Minus, ChevronDown, ChevronUp, X, Sun, Moon } from 'lucide-react'
 import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip, CartesianGrid } from 'recharts'
 import CookieBanner from './components/CookieBanner'
@@ -24,6 +25,13 @@ const countryDataMap: Record<string, CountryData> = {
   de: deData,
   cn: cnData,
   in: inData,
+}
+
+const countryDataQuality: Record<string, { mode: 'live' | 'snapshot'; note: string }> = {
+  us: { mode: 'live', note: 'Teilweise live via FRED (mit Fallback)' },
+  de: { mode: 'snapshot', note: 'Aktuell Snapshot-Werte (kein Live-Feed)' },
+  cn: { mode: 'snapshot', note: 'Aktuell Snapshot-Werte (kein Live-Feed)' },
+  in: { mode: 'snapshot', note: 'Aktuell Snapshot-Werte (kein Live-Feed)' },
 }
 
 const metricMeta: Record<string, { title: string; explanation: string; breakdown: { label: string; value: string }[] }> = {
@@ -94,6 +102,28 @@ function TrendIcon({ trend, status }: { trend: string; status: string }) {
   return <Minus className="w-3.5 h-3.5 text-slate-500" />
 }
 
+function deltaBasis(metric: Metric) {
+  if (metric.unit?.includes('YoY')) return 'ggü. Vorjahr'
+  if (metric.unit?.includes('MoM')) return 'ggü. Vormonat'
+  return 'ggü. Vorperiode'
+}
+
+function cohortAction(score: 'green' | 'yellow' | 'red') {
+  if (score === 'green') return 'Beobachten, selektiv Chancen nutzen.'
+  if (score === 'yellow') return 'Neutral bleiben, Risiko aktiv managen.'
+  return 'Defensiv agieren, Exposure reduzieren.'
+}
+
+function RiskTag({ status }: { status: 'green' | 'yellow' | 'red' }) {
+  const labels = { green: 'Risiko niedrig', yellow: 'Risiko mittel', red: 'Risiko hoch' }
+  const styles = {
+    green: 'text-emerald-600 bg-emerald-500/10 border border-emerald-500/30',
+    yellow: 'text-amber-600 bg-amber-500/10 border border-amber-500/30',
+    red: 'text-red-600 bg-red-500/10 border border-red-500/30',
+  }
+  return <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full ${styles[status]}`}>{labels[status]}</span>
+}
+
 function ScoreBadge({ score }: { score: 'green' | 'yellow' | 'red' }) {
   const styles = {
     green: 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/30',
@@ -104,14 +134,50 @@ function ScoreBadge({ score }: { score: 'green' | 'yellow' | 'red' }) {
   return <span className={`text-xs font-mono px-2 py-0.5 rounded-full ${styles[score]}`}>{labels[score]}</span>
 }
 
-function MetricModal({ metric, onClose }: { metric: Metric; onClose: () => void }) {
+function MetricModal({ metric, onClose, activeCountry }: { metric: Metric; onClose: () => void; activeCountry: string }) {
   const [range, setRange] = useState<RangeMode>('1Y')
+  const [realSeries, setRealSeries] = useState<Array<{ label: string; value: number }> | null>(null)
+  const [seriesSource, setSeriesSource] = useState<string>('Modellierte Zeitreihe (Fallback)')
   const meta = metricMeta[metric.id] ?? defaultMeta
-  const series = useMemo(() => makeSeries(metric, range), [metric, range])
+  const syntheticSeries = useMemo(() => makeSeries(metric, range), [metric, range])
+  const series = realSeries ?? syntheticSeries
+
+  useEffect(() => {
+    let mounted = true
+    const limit = range === '6M' ? 6 : range === '1Y' ? 12 : 36
+
+    fetchMacroSeries(activeCountry, metric.id, limit)
+      .then((result) => {
+        if (!mounted || !result?.points?.length) {
+          setRealSeries(null)
+          setSeriesSource('Modellierte Zeitreihe (Fallback)')
+          return
+        }
+        setRealSeries(result.points)
+        setSeriesSource(result.source)
+      })
+      .catch(() => {
+        if (!mounted) return
+        setRealSeries(null)
+        setSeriesSource('Modellierte Zeitreihe (Fallback)')
+      })
+
+    return () => {
+      mounted = false
+    }
+  }, [metric.id, range, activeCountry])
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [onClose])
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/55">
-      <div className="w-full max-w-3xl rounded-2xl border border-[var(--border)] bg-[var(--bg-card)] p-5">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/55" onClick={onClose}>
+      <div className="w-full max-w-3xl rounded-2xl border border-[var(--border)] bg-[var(--bg-card)] p-5" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between gap-4 mb-4">
           <div>
             <h3 className="font-display text-2xl text-[var(--text-primary)]">{meta.title}</h3>
@@ -148,6 +214,10 @@ function MetricModal({ metric, onClose }: { metric: Metric; onClose: () => void 
           </ResponsiveContainer>
         </div>
 
+        <div className="mt-3 text-xs text-[var(--text-muted)] font-mono">
+          Quelle: {seriesSource} · Aktualisierung: {range}
+        </div>
+
         <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-2">
           {meta.breakdown.map((b) => (
             <div key={b.label} className="rounded-lg border border-[var(--border)] p-3">
@@ -172,10 +242,17 @@ function MetricCard({ metric, onOpen }: { metric: Metric; onOpen: (m: Metric) =>
             <span className="text-xl font-display font-bold text-[var(--text-primary)]">{metric.value}</span>
             {metric.unit && <span className="text-xs text-[var(--text-muted)] font-mono">{metric.unit}</span>}
           </div>
+          <div className="mt-2">
+            <RiskTag status={metric.status} />
+          </div>
         </div>
         <div className="flex flex-col items-end gap-1.5 shrink-0">
           <TrendIcon trend={metric.trend} status={metric.status} />
-          {metric.trendValue && <span className="text-xs font-mono text-[var(--text-muted)]">{metric.trendValue}</span>}
+          {metric.trendValue && (
+            <span className="text-xs font-mono text-[var(--text-muted)]" title="Veränderung gegenüber der Vorperiode">
+              Δ {metric.trendValue} ({deltaBasis(metric)})
+            </span>
+          )}
         </div>
       </div>
     </button>
@@ -194,6 +271,7 @@ function CohortSection({ cohort, onOpenMetric }: { cohort: Cohort; onOpenMetric:
         </div>
         {collapsed ? <ChevronDown className="w-4 h-4 text-[var(--text-muted)]" /> : <ChevronUp className="w-4 h-4 text-[var(--text-muted)]" />}
       </button>
+      {!collapsed && <div className="text-xs font-mono text-[var(--text-secondary)] mb-2">Priorität: {cohortAction(cohort.score)}</div>}
       {!collapsed && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
           {cohort.metrics.map((m) => (
@@ -212,10 +290,18 @@ function OverallScore({ data }: { data: CountryData }) {
   const overall = reds >= 2 ? 'red' : yellows >= 2 ? 'yellow' : 'green'
   const labels = { green: 'Stabil', yellow: 'Unter Druck', red: 'Kritisch' }
   const colors = { green: 'text-emerald-600', yellow: 'text-amber-600', red: 'text-red-600' }
+  const decision = {
+    green: 'Nächste Handlung: Opportunistisch (kontrolliert Risiko aufbauen)',
+    yellow: 'Nächste Handlung: Neutral (Cash-Quote halten, selektiv investieren)',
+    red: 'Nächste Handlung: Defensiv (Risiko reduzieren, Qualität bevorzugen)',
+  }
   return (
-    <div className="flex items-center gap-3">
-      <div className={`font-display font-bold text-2xl ${colors[overall]}`}>{labels[overall]}</div>
-      <div className="flex gap-1">{scores.map((s, i) => <StatusDot key={i} status={s} />)}</div>
+    <div className="flex flex-col items-start gap-2">
+      <div className="flex items-center gap-3">
+        <div className={`font-display font-bold text-2xl ${colors[overall]}`}>{labels[overall]}</div>
+        <div className="flex gap-1">{scores.map((s, i) => <StatusDot key={i} status={s} />)}</div>
+      </div>
+      <div className="text-xs font-mono text-[var(--text-secondary)]">{decision[overall]}</div>
     </div>
   )
 }
@@ -224,14 +310,17 @@ export default function App() {
   const [activeCountry, setActiveCountry] = useState('us')
   const [data, setData] = useState<CountryData>(countryDataMap[activeCountry])
   const [liveMode, setLiveMode] = useState(false)
+  const [isLoadingCountry, setIsLoadingCountry] = useState(false)
   const [theme, setTheme] = useState<ThemeMode>('dark')
   const [selectedMetric, setSelectedMetric] = useState<Metric | null>(null)
+  const quality = countryDataQuality[activeCountry]
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
   }, [theme])
 
   useEffect(() => {
+    setIsLoadingCountry(true)
     setData(countryDataMap[activeCountry])
     if (activeCountry === 'us') {
       let mounted = true
@@ -239,12 +328,14 @@ export default function App() {
         if (!mounted) return
         setData(liveData)
         setLiveMode(liveData.lastUpdated !== usData.lastUpdated)
+        setIsLoadingCountry(false)
       })
       return () => {
         mounted = false
       }
     } else {
       setLiveMode(false)
+      setIsLoadingCountry(false)
     }
   }, [activeCountry])
 
@@ -264,8 +355,8 @@ export default function App() {
             <span className="text-[var(--text-muted)] text-xs font-mono hidden sm:block">Economic Pulse</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <span className="live-dot w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block"></span>
-            <span className="text-xs text-[var(--text-muted)] font-mono">{liveMode ? `Live ${data.lastUpdated}` : data.lastUpdated}</span>
+            <span className={`live-dot w-1.5 h-1.5 rounded-full inline-block ${liveMode ? 'bg-emerald-500' : 'bg-slate-500'}`}></span>
+            <span className="text-xs text-[var(--text-muted)] font-mono">{liveMode ? `Live ${data.lastUpdated}` : `Snapshot ${data.lastUpdated}`}</span>
           </div>
         </div>
       </header>
@@ -295,16 +386,35 @@ export default function App() {
             <h1 className="font-display font-bold text-3xl sm:text-4xl text-[var(--text-primary)] mb-1">
               {data.flag} {data.name}
             </h1>
-            <p className="text-[var(--text-secondary)] text-sm font-mono">Wirtschaftlicher Gesamtzustand</p>
+            <p className="text-[var(--text-secondary)] text-sm font-mono">Wirtschaftlicher Gesamtzustand · <a href="#methodik" className="underline hover:text-cyan-500">Methodik</a></p>
+            <p className="text-[var(--text-muted)] text-xs font-mono mt-1">
+              Datenmodus: {quality.mode === 'live' ? 'Live/Hybrid' : 'Snapshot'} · {quality.note}
+            </p>
           </div>
           <OverallScore data={data} />
         </div>
+
+        <div className="mb-6 rounded-xl border border-cyan-500/30 bg-cyan-500/10 p-3">
+          <p className="text-xs font-mono text-cyan-500">Top-Action jetzt</p>
+          <p className="text-sm text-[var(--text-primary)] mt-1">
+            {data.cohorts.filter((c) => c.score === 'red').length >= 2
+              ? 'Defensiv: Risiko runter, Cash-Quote hoch, nur Qualitätspositionen.'
+              : data.cohorts.filter((c) => c.score === 'yellow').length >= 2
+                ? 'Neutral: kein blindes Risk-on, selektiv auf starke Segmente fokussieren.'
+                : 'Opportunistisch: kontrolliert Risiko aufbauen und Timing diszipliniert halten.'}
+          </p>
+        </div>
+
+        {isLoadingCountry && (
+          <div className="mb-4 text-xs font-mono text-cyan-500">Daten werden aktualisiert…</div>
+        )}
 
         <div className="flex gap-4 mb-6 text-xs font-mono text-[var(--text-secondary)]">
           <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-emerald-500 inline-block"></span>Gesund</span>
           <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-amber-500 inline-block"></span>Angespannt</span>
           <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-red-500 inline-block"></span>Kritisch</span>
           <span className="ml-2 text-[var(--text-muted)]">· Klick auf Kachel für Erklärung + Graph</span>
+          <span className="ml-2 text-[var(--text-muted)]">· Δ zeigt die jeweilige Basis (Vorjahr/Vormonat/Vorperiode)</span>
         </div>
 
         <div className="flex flex-col gap-6">
@@ -313,13 +423,13 @@ export default function App() {
           ))}
         </div>
 
-        <div className="mt-12 pt-6 border-t border-[var(--border)] text-xs text-[var(--text-secondary)] font-mono flex flex-col sm:flex-row gap-2 justify-between">
+        <div id="methodik" className="mt-12 pt-6 border-t border-[var(--border)] text-xs text-[var(--text-secondary)] font-mono flex flex-col sm:flex-row gap-2 justify-between">
           <span>Daten: FRED, World Bank, BLS, Census Bureau, MBA · {liveMode ? `Live-Update ${data.lastUpdated}` : `Mock-Stand ${data.lastUpdated}`}</span>
           <span>KPI-Klick = Erklärung, Zeitreihe, Treiber</span>
         </div>
       </main>
 
-      {selectedMetric && <MetricModal metric={selectedMetric} onClose={() => setSelectedMetric(null)} />}
+      {selectedMetric && <MetricModal metric={selectedMetric} onClose={() => setSelectedMetric(null)} activeCountry={activeCountry} />}
       <CookieBanner />
     </div>
   )
