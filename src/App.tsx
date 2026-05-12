@@ -75,13 +75,26 @@ const metricMeta: Record<string, MetricMeta> = {
       { label: 'Anstieg', value: '+60%' },
     ],
   },
+  u6: {
+    title: 'Arbeitsmarkt (U6 + NFP)',
+    explanation:
+      'U6 misst den breiten Arbeitsmarktdruck: Arbeitslose + Unterbeschäftigte + entmutigte Arbeitskräfte im Verhältnis zur erweiterten Erwerbsbevölkerung. Non-Farm Payrolls (NFP) zeigen monatlich, wie viele Jobs außerhalb der Landwirtschaft netto entstanden oder verloren gingen.',
+    calculation:
+      'U6 = (Arbeitslose + marginal gebundene Personen + Teilzeit aus wirtschaftlichen Gründen) / (Erwerbspersonen + marginal gebundene Personen) × 100. NFP = monatliche Nettoveränderung der Beschäftigten außerhalb der Landwirtschaft laut BLS Establishment Survey.',
+    breakdown: [
+      { label: 'U6 aktuell', value: '7.4%' },
+      { label: 'NFP letzter Monat', value: '+175k' },
+      { label: '3M NFP-Schnitt', value: '+210k' },
+      { label: 'Interpretation', value: 'Abkühlung, aber kein Einbruch' },
+    ],
+  },
 }
 
 const defaultMeta: MetricMeta = {
   title: 'KPI-Details',
   explanation:
-    'Diese Kennzahl zeigt Richtung und Stärke der wirtschaftlichen Entwicklung. Für Entscheidungen ist der Trend meist wichtiger als der Einzelwert.',
-  calculation: 'Berechnung je KPI nach offizieller Quellmethodik (z. B. YoY, QoQ, Quotienten oder Indexstände).',
+    'Dieser Indikator beschreibt einen konkreten Teil der Wirtschaft (z. B. Preise, Jobs, Schulden, Nachfrage). Entscheidend ist der Trend über Zeit statt nur ein Einzelwert.',
+  calculation: 'Berechnet nach offizieller Quellenmethodik (z. B. Veränderungsrate YoY/MoM, Quote = Zähler/Nenner × 100 oder Indexstand mit Basisjahr).',
   breakdown: [
     { label: 'Signalqualität', value: 'Mittel–Hoch' },
     { label: 'Aktualisierungsrhythmus', value: 'Monatlich/Quartalsweise' },
@@ -100,11 +113,12 @@ function makeSeries(metric: Metric, range: RangeMode) {
   const seed = Number(metric.value.replace(',', '.').replace(/[^0-9.-]/g, '')) || 1
   const points = rangePoints[range]
   const result = [] as SeriesPoint[]
+  const now = new Date()
   for (let i = points - 1; i >= 0; i--) {
     const drift = (Math.sin(i / 2.5) + Math.cos(i / 3.7)) * 0.8
     const v = Math.max(0, seed + drift - i * 0.03)
-    const monthsAgo = i
-    const label = monthsAgo === 0 ? 'Jetzt' : range === '6M' || range === '1Y' ? `-${monthsAgo}m` : `-${Math.round(monthsAgo / 12)}y`
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
+    const label = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
     result.push({ label, value: Number(v.toFixed(2)) })
   }
   return result
@@ -124,14 +138,11 @@ function getYAxisDomain(series: SeriesPoint[], scaleMode: ScaleMode): [number, n
   return [Number((min - pad).toFixed(2)), Number((max + pad).toFixed(2))]
 }
 
-function getTickFormatter(range: RangeMode) {
-  const short = range === '6M' || range === '1Y' || range === '3Y'
-  return (_value: string, index: number) => {
-    const now = new Date()
-    const monthsBack = rangePoints[range] - 1 - index
-    const d = new Date(now.getFullYear(), now.getMonth() - monthsBack, 1)
-    if (short) return d.toLocaleDateString('de-DE', { month: 'short', year: '2-digit' })
-    return d.toLocaleDateString('de-DE', { year: 'numeric' })
+function getTickFormatter() {
+  return (value: string) => {
+    const [year, month] = String(value).split('-')
+    if (!year || !month) return value
+    return `${month}/${year.slice(-2)}`
   }
 }
 
@@ -185,7 +196,16 @@ function MetricModal({ metric, onClose, activeCountry }: { metric: Metric; onClo
   const [realSeries, setRealSeries] = useState<Array<SeriesPoint> | null>(null)
   const [seriesSource, setSeriesSource] = useState<string>('Modellierte Zeitreihe (Fallback)')
   const [markers, setMarkers] = useState<number[]>([])
-  const meta = metricMeta[metric.id] ?? defaultMeta
+  const meta = metricMeta[metric.id] ?? {
+    ...defaultMeta,
+    title: metric.label,
+    breakdown: [
+      { label: 'Aktueller Wert', value: `${metric.value}${metric.unit ? ` ${metric.unit}` : ''}` },
+      { label: 'Trend', value: metric.trend === 'up' ? 'Steigend' : metric.trend === 'down' ? 'Fallend' : 'Seitwärts' },
+      { label: 'Delta', value: metric.trendValue ?? 'k. A.' },
+      { label: 'Frequenz', value: 'Monatlich/Quartalsweise (je nach Quelle)' },
+    ],
+  }
   const syntheticSeries = useMemo(() => makeSeries(metric, range), [metric, range])
   const series = realSeries ?? syntheticSeries
 
@@ -227,7 +247,7 @@ function MetricModal({ metric, onClose, activeCountry }: { metric: Metric; onClo
   }, [onClose])
 
   const yDomain = useMemo(() => getYAxisDomain(series, scaleMode), [series, scaleMode])
-  const tickFormatter = useMemo(() => getTickFormatter(range), [range])
+  const tickFormatter = useMemo(() => getTickFormatter(), [])
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/55" onClick={onClose}>
@@ -286,7 +306,7 @@ function MetricModal({ metric, onClose, activeCountry }: { metric: Metric; onClo
               <CartesianGrid strokeDasharray="3 3" stroke="var(--grid)" />
               <XAxis dataKey="label" tickFormatter={tickFormatter} stroke="var(--text-muted)" fontSize={12} minTickGap={20} />
               <YAxis domain={yDomain} stroke="var(--text-muted)" fontSize={12} />
-              <Tooltip labelFormatter={(_, index) => tickFormatter('', Number(index) || 0)} />
+              <Tooltip labelFormatter={(value) => tickFormatter(String(value))} />
               <Line type="linear" dataKey="value" stroke="#06b6d4" strokeWidth={2.5} dot={false} />
               {markers.map((idx) => {
                 const point = series[idx]
