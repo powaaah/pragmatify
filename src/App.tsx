@@ -246,21 +246,35 @@ function MetricModal({ metric, onClose, activeCountry }: { metric: Metric; onClo
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [onClose])
 
+  useEffect(() => {
+    const prevBodyOverflow = document.body.style.overflow
+    const prevHtmlOverflow = document.documentElement.style.overflow
+    document.body.style.overflow = 'hidden'
+    document.documentElement.style.overflow = 'hidden'
+
+    return () => {
+      document.body.style.overflow = prevBodyOverflow
+      document.documentElement.style.overflow = prevHtmlOverflow
+    }
+  }, [])
+
   const yDomain = useMemo(() => getYAxisDomain(series, scaleMode), [series, scaleMode])
   const tickFormatter = useMemo(() => getTickFormatter(), [])
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/55" onClick={onClose}>
-      <div className="w-full max-w-3xl rounded-2xl border border-[var(--border)] bg-[var(--bg-card)] p-5" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-start justify-between gap-4 mb-4">
+    <div className="fixed inset-0 z-50 overflow-y-auto p-3 sm:p-4 bg-slate-950/55" onClick={onClose}>
+      <div className="mx-auto my-4 sm:my-8 w-full max-w-3xl max-h-[92dvh] overflow-y-auto overscroll-contain rounded-2xl border border-[var(--border)] bg-[var(--bg-card)] p-4 sm:p-5" onClick={(e) => e.stopPropagation()}>
+        <div className="sticky top-0 z-10 -mx-4 sm:-mx-5 px-4 sm:px-5 py-2 mb-2 bg-[var(--bg-card)] border-b border-[var(--border)]">
+          <div className="flex items-start justify-between gap-4">
           <div>
             <h3 className="font-display text-2xl text-[var(--text-primary)]">{meta.title}</h3>
             <p className="text-sm text-[var(--text-secondary)] mt-1">{meta.explanation}</p>
             <p className="text-xs text-[var(--text-muted)] mt-2"><span className="font-semibold">Berechnung:</span> {meta.calculation}</p>
           </div>
-          <button onClick={onClose} className="p-2 rounded-lg border border-[var(--border)] hover:bg-slate-100/20">
-            <X className="w-4 h-4" />
-          </button>
+            <button onClick={onClose} className="p-2 rounded-lg border border-[var(--border)] hover:bg-slate-100/20">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
 
         <div className="mb-3 flex flex-wrap gap-2 items-center justify-between">
