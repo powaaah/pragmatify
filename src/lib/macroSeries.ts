@@ -10,10 +10,12 @@ export interface DataSourceLink {
   url: string
 }
 
-const FRED_API_KEY = '548516…6a2c'
+const FRED_API_KEY = import.meta.env.VITE_FRED_API_KEY ?? '548516967661e1619952c7570dfc6a2c'
 
 const FRED_BY_METRIC: Record<string, string> = {
   'debt-gdp': 'GFDEGDQ188S',
+  'gdp-growth': 'A191RL1Q225SBEA',
+  inflation: 'CPIAUCSL',
   yield10y: 'DGS10',
   'savings-rate': 'PSAVERT',
   u6: 'U6RATE',
