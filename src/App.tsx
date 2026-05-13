@@ -6,6 +6,7 @@ import { inData } from './data/india'
 import { getUSLiveData } from './data/usLive'
 import type { CountryData, Metric, Cohort } from './data/us'
 import { fetchMacroSeries } from './lib/macroSeries'
+import type { DataSourceLink } from './lib/macroSeries'
 import { TrendingUp, TrendingDown, Minus, ChevronDown, ChevronUp, X, Sun, Moon } from 'lucide-react'
 import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip, CartesianGrid, ReferenceDot } from 'recharts'
 import CookieBanner from './components/CookieBanner'
@@ -196,6 +197,7 @@ function MetricModal({ metric, onClose, activeCountry }: { metric: Metric; onClo
   const [realSeries, setRealSeries] = useState<Array<SeriesPoint> | null>(null)
   const [seriesSource, setSeriesSource] = useState<string>('Modellierte Zeitreihe (Fallback)')
   const [markers, setMarkers] = useState<number[]>([])
+  const [sourceLinks, setSourceLinks] = useState<DataSourceLink[]>([])
   const meta = metricMeta[metric.id] ?? {
     ...defaultMeta,
     title: metric.label,
@@ -218,15 +220,18 @@ function MetricModal({ metric, onClose, activeCountry }: { metric: Metric; onClo
         if (!mounted || !result?.points?.length) {
           setRealSeries(null)
           setSeriesSource('Modellierte Zeitreihe (Fallback)')
+          setSourceLinks([])
           return
         }
         setRealSeries(result.points)
         setSeriesSource(result.source)
+        setSourceLinks(result.links ?? [])
       })
       .catch(() => {
         if (!mounted) return
         setRealSeries(null)
         setSeriesSource('Modellierte Zeitreihe (Fallback)')
+        setSourceLinks([])
       })
 
     return () => {
@@ -346,6 +351,24 @@ function MetricModal({ metric, onClose, activeCountry }: { metric: Metric; onClo
         <div className="mt-3 text-xs text-[var(--text-muted)] font-mono">
           Quelle: {seriesSource} · Aktualisierung: {range} · Marker: Klick in den Chart zum Setzen/Entfernen
         </div>
+        {sourceLinks.length > 0 && (
+          <div className="mt-2 text-xs">
+            <p className="text-[var(--text-secondary)] mb-1">Originalquelle:</p>
+            <div className="flex flex-col gap-1">
+              {sourceLinks.map((link) => (
+                <a
+                  key={link.url}
+                  href={link.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-cyan-500 hover:text-cyan-400 underline break-all"
+                >
+                  {link.label}
+                </a>
+              ))}
+            </div>
+          </div>
+        )}
 
         <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-2">
           {meta.breakdown.map((b) => (

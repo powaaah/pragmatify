@@ -5,6 +5,11 @@ export interface MacroPoint {
   value: number
 }
 
+export interface DataSourceLink {
+  label: string
+  url: string
+}
+
 const FRED_API_KEY = '548516…6a2c'
 
 const FRED_BY_METRIC: Record<string, string> = {
@@ -14,6 +19,9 @@ const FRED_BY_METRIC: Record<string, string> = {
   u6: 'U6RATE',
   'mortgage-rate': 'MORTGAGE30US',
   'housing-starts': 'HOUST',
+  'credit-default': 'DRBLACBS',
+  'consumer-credit-default': 'DRCCLACBS',
+  'mortgage-delinquency': 'DRSFRMACBS',
 }
 
 const WORLD_BANK_INDICATOR: Record<string, string> = {
@@ -41,7 +49,11 @@ async function fetchWorldBankSeries(country: string, indicator: string): Promise
     .sort((a: MacroPoint, b: MacroPoint) => Number(a.label) - Number(b.label))
 }
 
-export async function fetchMacroSeries(countryId: string, metricId: string, points: number): Promise<{ points: MacroPoint[]; source: string } | null> {
+export async function fetchMacroSeries(
+  countryId: string,
+  metricId: string,
+  points: number,
+): Promise<{ points: MacroPoint[]; source: string; links?: DataSourceLink[] } | null> {
   if (countryId === 'us') {
     const fred = FRED_BY_METRIC[metricId]
     if (!fred) return null
@@ -49,7 +61,8 @@ export async function fetchMacroSeries(countryId: string, metricId: string, poin
     if (!data.length) return null
     return {
       points: data.slice(-points).map((p) => ({ label: p.date.slice(0, 7), value: Number(p.value.toFixed(2)) })),
-      source: 'FRED Originaldaten',
+      source: `FRED Originaldaten (${fred})`,
+      links: [{ label: `FRED: ${fred}`, url: `https://fred.stlouisfed.org/series/${fred}` }],
     }
   }
 
@@ -61,7 +74,13 @@ export async function fetchMacroSeries(countryId: string, metricId: string, poin
   if (!data.length) return null
   return {
     points: data.slice(-points).map((p) => ({ label: p.label, value: Number(p.value.toFixed(2)) })),
-    source: 'World Bank Originaldaten',
+    source: `World Bank Originaldaten (${wbIndicator})`,
+    links: [
+      {
+        label: `World Bank: ${wbIndicator}`,
+        url: `https://api.worldbank.org/v2/country/${wbCountry}/indicator/${wbIndicator}?format=json`,
+      },
+    ],
   }
 }
 
